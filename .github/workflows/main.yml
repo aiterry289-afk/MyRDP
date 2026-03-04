@@ -1,0 +1,84 @@
+name: Multi Windows RDP Auto Delete
+
+on:
+  workflow_dispatch:
+    inputs:
+      vm_count:
+        description: "Number of VMs"
+        required: true
+        default: "2"
+      location:
+        description: "Azure Region"
+        required: true
+        default: "eastus"
+      vm_size:
+        description: "VM Size"
+        required: true
+        default: "Standard_B1s"
+      admin_username:
+        description: "Admin Username"
+        required: true
+        default: "azureuser"
+      admin_password:
+        description: "Admin Password"
+        required: true
+        default: "StrongPassword@1234"
+
+jobs:
+  create-vms:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Create Resource Group
+        run: |
+          az group create \
+            --name multi-rdp-rg \
+            --location ${{ github.event.inputs.location }}
+
+      - name: Create Multiple VMs
+        run: |
+          for i in $(seq 1 ${{ github.event.inputs.vm_count }}); do
+            VM_NAME="rdp-vm-$i"
+            echo "Creating $VM_NAME"
+
+            az vm create \
+              --resource-group multi-rdp-rg \
+              --name $VM_NAME \
+              --image Win2022Datacenter \
+              --admin-username ${{ github.event.inputs.admin_username }} \
+              --admin-password "${{ github.event.inputs.admin_password }}" \
+              --size ${{ github.event.inputs.vm_size }} \
+              --public-ip-sku Standard
+
+            az vm open-port \
+              --resource-group multi-rdp-rg \
+              --name $VM_NAME \
+              --port 3389
+
+            IP=$(az vm show -d \
+              --resource-group multi-rdp-rg \
+              --name $VM_NAME \
+              --query publicIps -o tsv)
+
+            echo "===== $VM_NAME DETAILS ====="
+            echo "IP Address: $IP"
+            echo "Username: ${{ github.event.inputs.admin_username }}"
+            echo "Password: ${{ github.event.inputs.admin_password }}"
+            echo "============================"
+          done
+
+      - name: Wait 6 Hours
+        run: sleep 21600
+
+      - name: Auto Delete Resource Group
+        run: |
+          echo "Deleting all VMs..."
+          az group delete --name multi-rdp-rg --yes --no-wait
